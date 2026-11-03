@@ -34,7 +34,7 @@ Total time: about 1 hour, mostly waiting for compilation.
 
 ```bash
 sudo apt install git
-git clone <this repository> ~/ar-sandbox-kit
+git clone https://github.com/vadimegorov13/ar-sandbox-kit.git ~/ar-sandbox-kit
 cd ~/ar-sandbox-kit
 ```
 

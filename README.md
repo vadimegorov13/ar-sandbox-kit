@@ -31,7 +31,7 @@ The core software is [SARndbox](https://web.cs.ucdavis.edu/~okreylos/ResDev/SARn
 ## Quick start
 
 ```bash
-git clone <this repository> ar-sandbox-kit
+git clone https://github.com/vadimegorov13/ar-sandbox-kit.git
 cd ar-sandbox-kit
 ./install.sh
 ```
@@ -53,7 +53,7 @@ Full instructions, including manual steps and other distributions: **[docs/INSTA
 
 ## How it was made
 
-Built September–November 2026 on a dedicated Ubuntu 24.04 PC (Kinect v1, BenQ projector, GTX 970). The upstream build was done with OpenAI Codex. The Control Center, calibration diagnostics and this kit were then written with Claude Code, after several failed projector calibrations showed what a beginner needs to see while calibrating.
+Built by Vadim Egorov at the University of Alaska Anchorage College of Engineering, September–November 2026, on a dedicated Ubuntu 24.04 PC (Kinect v1, BenQ projector, GTX 970). The upstream build was done with OpenAI Codex. The Control Center, calibration diagnostics and this kit were then written with Claude Code, after several failed projector calibrations showed what a beginner needs to see while calibrating.
 
 ## Credits
 
