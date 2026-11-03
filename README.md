@@ -58,3 +58,7 @@ Built September–November 2026 on a dedicated Ubuntu 24.04 PC (Kinect v1, BenQ 
 ## Credits
 
 SARndbox, Vrui and the Kinect package are © Oliver Kreylos, UC Davis KeckCAVES, released under the GNU GPL v2. This kit does not include their source code: `build-sarndbox.sh` downloads the original releases and checks their SHA-256 sums.
+
+## License
+
+The kit (scripts, Control Center, documentation) is released under the [MIT License](LICENSE). The upstream SARndbox, Vrui and Kinect software it downloads remains under the GNU GPL v2. The two files in `patches/` modify that GPL code and are distributed under the GPL v2 as well.
