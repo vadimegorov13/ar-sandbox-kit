@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=AR Sandbox Control Center
+Comment=Start, calibrate, check and stop the AR Sandbox
+Exec=@BIN@/control-center
+Icon=applications-science
+Terminal=false
+StartupNotify=true
+Categories=Education;Science;

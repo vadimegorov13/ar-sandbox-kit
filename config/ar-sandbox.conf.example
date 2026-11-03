@@ -1,0 +1,33 @@
+# AR Sandbox settings, installed as ~/.config/ar-sandbox/ar-sandbox.conf.
+# This file is read by bash: KEY=value, no spaces around "=", quote values
+# that contain spaces. Close and reopen the Control Center after editing.
+
+# Folder where SARndbox 2.8 was built (scripts/build-sarndbox.sh --src DIR).
+SANDBOX_ROOT="$HOME/src/SARndbox-2.8"
+
+# Install prefix of Vrui and the Kinect package (scripts/build-sarndbox.sh --prefix).
+VRUI_PREFIX=/usr/local
+
+# Projector output name as shown by `xrandr --query` (for example HDMI-0),
+# or "auto": the only display, or the non-primary one when there are two.
+PROJECTOR_OUTPUT=auto
+# Projector resolution. Use the projector's native resolution; changing it
+# later requires a new projector calibration.
+PROJECTOR_WIDTH=1024
+PROJECTOR_HEIGHT=768
+PROJECTOR_RATE=60
+
+# Operator monitor output name, "auto" (any other connected display), or ""
+# when the projector is the only display.
+MONITOR_OUTPUT=auto
+
+# Water simulation grid. Smaller is faster; 200x150 suits a GTX 970-class GPU.
+WATER_GRID_WIDTH=200
+WATER_GRID_HEIGHT=150
+
+# NVIDIA driver series used by "Repair Graphics Driver". Leave empty on
+# AMD/Intel graphics.
+NVIDIA_DRIVER=580
+
+# Folder for the user guide and calibration profiles.
+DOCS_DIR="$HOME/Documents/AR Sandbox"

@@ -1,0 +1,28 @@
+#!/bin/bash
+set -u
+source "$(dirname "$(readlink -f "$0")")/common.sh"
+
+stop_ar_programs
+if ! configure_displays; then
+    show_error "The projector display could not be configured. Check its power and video connection."
+    exit 1
+fi
+
+monitor_index=$(xrandr --listmonitors | awk -v output="$AR_PROJECTOR_OUTPUT" '
+    $NF==output {gsub(":", "", $1); print $1; exit}
+')
+export AR_GRID_MONITOR="${monitor_index:-0}"
+
+grid_pid=""
+cleanup() {
+    if [[ "$grid_pid" =~ ^[0-9]+$ ]]; then
+        kill -TERM "$grid_pid" 2>/dev/null || true
+    fi
+    rm -f "$AR_STATE/level-grid.pid"
+}
+trap cleanup EXIT INT TERM
+
+python3 "$AR_BIN"/level-grid.py &
+grid_pid=$!
+echo "$grid_pid" >"$AR_STATE/level-grid.pid"
+wait "$grid_pid"

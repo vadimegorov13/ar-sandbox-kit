@@ -1,0 +1,89 @@
+#!/bin/bash
+set -u
+source "$(dirname "$(readlink -f "$0")")/common.sh"
+
+active_name="None"
+if profile_dir=$(active_profile_dir); then
+    active_name=$(basename "$profile_dir")
+fi
+
+action=$(zenity --list --title="Calibration Profiles" --width=700 --height=430 --hide-header \
+    --column="Action" --column="Description" \
+    "View active profile" "Show plane, four corners, dimensions, and projector status for: $active_name" \
+    "Create profile from current" "Save current geometry and projector calibration under a new name" \
+    "Activate profile" "Make a saved profile the current sandbox configuration" \
+    "Update active profile" "Replace the active profile with the current files" \
+    "Manual geometry adjustment" "Edit dimensions and corrections; automatically updates the active profile" \
+    "Open profiles folder" "Open all profile files in the file manager" \
+    "Cancel" "Close this window") || exit 0
+
+case "$action" in
+    "View active profile")
+        profile_dir=$(active_profile_dir) || { show_error "No calibration profile is active."; exit 1; }
+        summary="$AR_STATE/profile-view.txt"
+        python3 - "$profile_dir" >"$summary" <<'PY'
+import hashlib, math, pathlib, re, sys
+p=pathlib.Path(sys.argv[1]); layout=p/'BoxLayout.txt'; matrix=p/'ProjectorMatrix.dat'
+print(f"PROFILE: {p.name}\n")
+if not layout.exists():
+    print("Geometry: MISSING")
+else:
+    text=layout.read_text(); print("RAW GEOMETRY VALUES\n"+text.rstrip()+"\n")
+    plane=re.search(r'^\(\s*([-+0-9.eE]+),\s*([-+0-9.eE]+),\s*([-+0-9.eE]+)\),\s*([-+0-9.eE]+)',text,re.M)
+    pts=[tuple(map(float,m.groups())) for m in re.finditer(r'^\(\s*([-+0-9.eE]+),\s*([-+0-9.eE]+),\s*([-+0-9.eE]+)\)\s*$',text,re.M)]
+    if plane and len(pts)==4:
+        def d(a,b): return math.sqrt(sum((x-y)**2 for x,y in zip(a,b)))
+        labels=("Lower-left","Lower-right","Upper-left","Upper-right")
+        print("LABELED CORNERS")
+        for label,point in zip(labels,pts): print(f"{label:12}: ({point[0]:.4f}, {point[1]:.4f}, {point[2]:.4f})")
+        print(f"\nWidths : {d(pts[0],pts[1]):.2f} / {d(pts[2],pts[3]):.2f} cm")
+        print(f"Depths : {d(pts[0],pts[2]):.2f} / {d(pts[1],pts[3]):.2f} cm")
+        print(f"Diagonals: {d(pts[0],pts[3]):.2f} / {d(pts[1],pts[2]):.2f} cm")
+print("\nPROJECTOR CALIBRATION")
+if matrix.exists():
+    print(f"Present: yes ({matrix.stat().st_size} bytes)")
+    print("SHA-256: "+hashlib.sha256(matrix.read_bytes()).hexdigest())
+else: print("Present: no — projector calibration is still required for this profile")
+PY
+        zenity --text-info --title="Calibration profile: $(basename "$profile_dir")" --width=760 --height=620 --filename="$summary" --font="Monospace 10"
+        ;;
+    "Create profile from current")
+        [ -f "$SANDBOX_CONFIG/BoxLayout.txt" ] || { show_error "Current geometry is missing."; exit 1; }
+        name=$(zenity --entry --title="Create calibration profile" --width=520 --text="Enter a short profile name, such as Normal Setup or Visitor Mode:") || exit 0
+        if [[ ! "$name" =~ ^[A-Za-z0-9][A-Za-z0-9_-]*([[:space:]][A-Za-z0-9_-]+)*$ ]] || [ "${#name}" -gt 50 ]; then
+            show_error "Use 1–50 letters, numbers, spaces, underscores, or hyphens."
+            exit 1
+        fi
+        profile_dir="$AR_PROFILES_DIR/$name"
+        [ ! -e "$profile_dir" ] || { show_error "A profile named '$name' already exists."; exit 1; }
+        mkdir -p "$profile_dir"
+        cp "$SANDBOX_CONFIG/BoxLayout.txt" "$profile_dir/BoxLayout.txt"
+        [ ! -f "$SANDBOX_CONFIG/ProjectorMatrix.dat" ] || cp "$SANDBOX_CONFIG/ProjectorMatrix.dat" "$profile_dir/ProjectorMatrix.dat"
+        printf '%s\n' "$name" >"$AR_ACTIVE_PROFILE_FILE"
+        show_info "Created and activated profile: $name"
+        ;;
+    "Activate profile")
+        mapfile -t profiles < <(find "$AR_PROFILES_DIR" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort)
+        [ "${#profiles[@]}" -gt 0 ] || { show_error "No saved profiles exist yet."; exit 1; }
+        name=$(zenity --list --title="Activate calibration profile" --width=520 --height=420 --column="Profile" "${profiles[@]}") || exit 0
+        profile_dir="$AR_PROFILES_DIR/$name"
+        [ -f "$profile_dir/BoxLayout.txt" ] || { show_error "That profile has no geometry file."; exit 1; }
+        timestamp=$(date +%Y%m%d-%H%M%S); backup="$AR_STATE/ProfileActivation-$timestamp"; mkdir -p "$backup"
+        [ ! -f "$SANDBOX_CONFIG/BoxLayout.txt" ] || cp "$SANDBOX_CONFIG/BoxLayout.txt" "$backup/BoxLayout.txt"
+        [ ! -f "$SANDBOX_CONFIG/ProjectorMatrix.dat" ] || mv "$SANDBOX_CONFIG/ProjectorMatrix.dat" "$backup/ProjectorMatrix.dat"
+        cp "$profile_dir/BoxLayout.txt" "$SANDBOX_CONFIG/BoxLayout.txt"
+        [ ! -f "$profile_dir/ProjectorMatrix.dat" ] || cp "$profile_dir/ProjectorMatrix.dat" "$SANDBOX_CONFIG/ProjectorMatrix.dat"
+        printf '%s\n' "$name" >"$AR_ACTIVE_PROFILE_FILE"
+        show_info "Activated profile: $name\n\nPrevious current files were backed up in:\n$backup"
+        ;;
+    "Update active profile")
+        profile_dir=$(active_profile_dir) || { show_error "No calibration profile is active."; exit 1; }
+        name=$(basename "$profile_dir")
+        zenity --question --title="Update $name?" --width=520 --text="Replace profile '$name' with the current geometry and projector calibration?" || exit 0
+        cp "$SANDBOX_CONFIG/BoxLayout.txt" "$profile_dir/BoxLayout.txt"
+        if [ -f "$SANDBOX_CONFIG/ProjectorMatrix.dat" ]; then cp "$SANDBOX_CONFIG/ProjectorMatrix.dat" "$profile_dir/ProjectorMatrix.dat"; else mv "$profile_dir/ProjectorMatrix.dat" "$profile_dir/ProjectorMatrix.dat.backup-$(date +%Y%m%d-%H%M%S)" 2>/dev/null || true; fi
+        show_info "Updated profile: $name"
+        ;;
+    "Manual geometry adjustment") "$AR_BIN"/manual-geometry & ;;
+    "Open profiles folder") xdg-open "$AR_PROFILES_DIR" >/dev/null 2>&1 & ;;
+esac

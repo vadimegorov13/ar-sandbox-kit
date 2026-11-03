@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=AR Sandbox Guide
+Comment=Open the operating, calibration and troubleshooting guide
+Exec=xdg-open "@GUIDE@"
+Icon=help-browser
+Terminal=false
+StartupNotify=true
+Categories=Education;Science;

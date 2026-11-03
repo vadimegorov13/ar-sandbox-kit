@@ -1,0 +1,74 @@
+#!/bin/bash
+# Reinstalls the NVIDIA driver so it matches every installed kernel (Ubuntu).
+# Opened in a terminal by the Control Center; asks for the password once.
+set -u
+source "$(dirname "$(readlink -f "$0")")/common.sh"
+DRIVER=${NVIDIA_DRIVER:-}
+
+say()  { printf '\n\033[1m%s\033[0m\n' "$*"; }
+fail() { printf '\n\033[1;31m%s\033[0m\n' "$*"; read -rp "Press Enter to close this window." _; exit 1; }
+installed() { dpkg-query -W -f='${Status}' "$1" 2>/dev/null | grep -q "install ok installed"; }
+available() { apt-cache show "$1" >/dev/null 2>&1; }
+
+say "AR Sandbox: repair NVIDIA graphics driver"
+command -v apt-get >/dev/null || fail "This repair only works on Ubuntu and other apt-based systems."
+[ -n "$DRIVER" ] || fail "NVIDIA_DRIVER is empty in $AR_CONFIG_FILE, so there is no NVIDIA driver to repair."
+echo "This reinstalls the NVIDIA $DRIVER driver and the matching kernel module."
+echo "It needs an internet connection and your password, and takes a few minutes."
+echo "Close the sandbox before continuing."
+read -rp "Press Enter to start, or close this window to cancel." _
+
+sudo -v || fail "The password was not accepted. Nothing was changed."
+
+say "1/4  Refreshing the package list"
+sudo apt-get update || fail "Could not refresh the package list. Check the internet connection and try again."
+
+# Upgrading the kernel metapackage and the NVIDIA module metapackage of the
+# same flavour together is what keeps them in step.
+kernel_meta=linux-generic
+for candidate in linux-generic-hwe-24.04 linux-generic-hwe-22.04 linux-generic; do
+    if installed "$candidate"; then kernel_meta=$candidate; break; fi
+done
+modules_meta="linux-modules-nvidia-$DRIVER-${kernel_meta#linux-}"
+
+say "2/4  Installing the newest kernel together with its NVIDIA module"
+if available "$modules_meta"; then
+    sudo apt-get install -y "nvidia-driver-$DRIVER" "$kernel_meta" "$modules_meta" \
+        || fail "Installing the driver failed. Take a photo of this window for troubleshooting."
+else
+    echo "Ubuntu publishes no prebuilt module package ($modules_meta); building it with DKMS instead."
+    sudo apt-get install -y "nvidia-driver-$DRIVER" "nvidia-dkms-$DRIVER" "$kernel_meta" \
+        || fail "Installing the driver failed. Take a photo of this window for troubleshooting."
+fi
+
+say "3/4  Adding the NVIDIA module for every other installed kernel"
+for kernel_dir in /lib/modules/*; do
+    kernel=$(basename "$kernel_dir")
+    package="linux-modules-nvidia-$DRIVER-$kernel"
+    if available "$package"; then
+        sudo apt-get install -y "$package" || echo "  (could not install $package)"
+    else
+        echo "  No prebuilt NVIDIA module is published for kernel $kernel"
+    fi
+done
+
+say "4/4  Checking the result"
+newest=$(ls /lib/modules | sort -V | tail -n 1)
+ok=1
+for kernel_dir in /lib/modules/*; do
+    kernel=$(basename "$kernel_dir")
+    if find "$kernel_dir" -name 'nvidia.ko*' 2>/dev/null | grep -q .; then
+        echo "  $kernel: NVIDIA module present"
+    else
+        echo "  $kernel: NVIDIA module MISSING"
+        [ "$kernel" = "$newest" ] && ok=0
+    fi
+done
+[ "$ok" = 1 ] || fail "The newest kernel ($newest) still has no NVIDIA module. Try again later; Ubuntu sometimes publishes it a day after the kernel."
+
+say "Done. The driver starts after a restart (newest kernel: $newest)."
+read -rp "Restart the computer now? [y/N] " answer
+case "$answer" in
+    [yY]*) systemctl reboot ;;
+    *) echo "Restart later to finish the repair."; read -rp "Press Enter to close this window." _ ;;
+esac

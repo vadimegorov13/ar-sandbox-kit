@@ -1,0 +1,112 @@
+#!/bin/bash
+set -u
+source "$(dirname "$(readlink -f "$0")")/common.sh"
+
+layout_file="$SANDBOX_CONFIG/BoxLayout.txt"
+if [ ! -f "$layout_file" ]; then
+    show_error "BoxLayout.txt was not found. Run Geometry Calibration Wizard first."
+    exit 1
+fi
+
+current=$(python3 - "$layout_file" <<'PY'
+import math, pathlib, re, sys
+text=pathlib.Path(sys.argv[1]).read_text()
+points=[tuple(map(float,m.groups())) for m in re.finditer(r'^\(\s*([-+0-9.eE]+),\s*([-+0-9.eE]+),\s*([-+0-9.eE]+)\)\s*$',text,re.M)]
+def d(a,b): return math.sqrt(sum((x-y)**2 for x,y in zip(a,b)))
+if len(points)!=4: raise SystemExit(2)
+print(f"{(d(points[0],points[1])+d(points[2],points[3]))/2:.1f}|{(d(points[0],points[2])+d(points[1],points[3]))/2:.1f}")
+PY
+) || { show_error "The current geometry file could not be read."; exit 1; }
+
+current_width=${current%%|*}
+current_depth=${current##*|}
+values=$(zenity --forms --title="Manual sandbox geometry" --width=650 \
+    --separator='|' \
+    --text="Measure the INSIDE dimensions of the sandbox with a tape measure.\n\nCurrent estimated size: ${current_width} cm wide × ${current_depth} cm deep.\n\nWidth and depth are required. Leave correction fields blank for zero. A backup is created before saving." \
+    --add-entry="Inside width in cm" \
+    --add-entry="Inside depth in cm" \
+    --add-entry="Shift right in cm (optional)" \
+    --add-entry="Shift toward upper corners in cm (optional)" \
+    --add-entry="Rotate clockwise in degrees (optional)") || exit 0
+
+IFS='|' read -r width depth shift_right shift_up rotation <<<"$values"
+shift_right=${shift_right:-0}
+shift_up=${shift_up:-0}
+rotation=${rotation:-0}
+
+timestamp=$(date +%Y%m%d-%H%M%S)
+backup_file="$SANDBOX_CONFIG/BoxLayout.txt.backup-manual-$timestamp"
+summary_file="$AR_STATE/ManualGeometry-$timestamp-summary.txt"
+
+if ! python3 - "$layout_file" "$backup_file" "$width" "$depth" "$shift_right" "$shift_up" "$rotation" >"$summary_file" <<'PY'
+import math, pathlib, re, shutil, sys
+
+layout_path=pathlib.Path(sys.argv[1]); backup_path=pathlib.Path(sys.argv[2])
+try:
+    width,depth,shift_right,shift_up,rotation=map(float,sys.argv[3:8])
+except ValueError:
+    print("Enter numbers only. Width and depth cannot be blank.")
+    raise SystemExit(2)
+if not (30<=width<=300 and 30<=depth<=300):
+    print("Width and depth must each be between 30 and 300 cm.")
+    raise SystemExit(3)
+if abs(shift_right)>50 or abs(shift_up)>50 or abs(rotation)>30:
+    print("Corrections are limited to ±50 cm and rotation to ±30 degrees.")
+    raise SystemExit(4)
+
+text=layout_path.read_text()
+pm=re.search(r'^\(\s*([-+0-9.eE]+),\s*([-+0-9.eE]+),\s*([-+0-9.eE]+)\),\s*([-+0-9.eE]+)',text,re.M)
+points=[tuple(map(float,m.groups())) for m in re.finditer(r'^\(\s*([-+0-9.eE]+),\s*([-+0-9.eE]+),\s*([-+0-9.eE]+)\)\s*$',text,re.M)]
+if not pm or len(points)!=4:
+    print("The current BoxLayout.txt is not valid.")
+    raise SystemExit(5)
+
+nx,ny,nz,offset=map(float,pm.groups())
+nlen=math.sqrt(nx*nx+ny*ny+nz*nz); n=(nx/nlen,ny/nlen,nz/nlen); offset/=nlen
+def add(a,b): return tuple(x+y for x,y in zip(a,b))
+def sub(a,b): return tuple(x-y for x,y in zip(a,b))
+def mul(a,s): return tuple(x*s for x in a)
+def dot(a,b): return sum(x*y for x,y in zip(a,b))
+def norm(a):
+    length=math.sqrt(dot(a,a))
+    if length<1e-6: raise SystemExit("Existing corner orientation is degenerate.")
+    return mul(a,1/length)
+def project(p): return add(p,mul(n,offset-dot(n,p)))
+
+points=[project(p) for p in points]
+center=mul(tuple(sum(p[i] for p in points) for i in range(3)),0.25)
+x=norm(add(sub(points[1],points[0]),sub(points[3],points[2])))
+yraw=add(sub(points[2],points[0]),sub(points[3],points[1]))
+y=norm(sub(sub(yraw,mul(x,dot(yraw,x))),mul(n,dot(yraw,n))))
+
+angle=math.radians(rotation)
+xr=add(mul(x,math.cos(angle)),mul(y,math.sin(angle)))
+yr=add(mul(x,-math.sin(angle)),mul(y,math.cos(angle)))
+center=add(center,add(mul(xr,shift_right),mul(yr,shift_up)))
+
+ll=add(center,add(mul(xr,-width/2),mul(yr,-depth/2)))
+lr=add(center,add(mul(xr, width/2),mul(yr,-depth/2)))
+ul=add(center,add(mul(xr,-width/2),mul(yr, depth/2)))
+ur=add(center,add(mul(xr, width/2),mul(yr, depth/2)))
+
+shutil.copy2(layout_path,backup_path)
+new=f"({n[0]:.10f}, {n[1]:.10f}, {n[2]:.10f}), {offset:.4f}\n"
+new+='\n'.join(f"({p[0]:10.4f}, {p[1]:10.4f}, {p[2]:10.4f})" for p in (ll,lr,ul,ur))+"\n"
+layout_path.write_text(new)
+
+print(f"Saved a {width:.1f} cm × {depth:.1f} cm rectangular sandbox geometry.")
+print(f"Center correction: right {shift_right:.1f} cm; toward upper corners {shift_up:.1f} cm")
+print(f"Rotation correction: {rotation:.1f} degrees clockwise")
+print(f"Backup: {backup_path}")
+print(f"Updated: {layout_path}")
+PY
+then
+    zenity --text-info --title="Geometry was not changed" --width=680 --height=360 --filename="$summary_file" --font="Monospace 10"
+    exit 1
+fi
+
+zenity --text-info --title="Manual geometry saved" --width=720 --height=420 --filename="$summary_file" --font="Monospace 10"
+sync_active_geometry
+active_note=""
+if profile_dir=$(active_profile_dir); then active_note="\n\nActive profile updated: $(basename "$profile_dir")"; fi
+show_info "Manual sandbox dimensions were saved.$active_note\n\nRun Projector Calibration afterward, then verify the projected boundary and contours."

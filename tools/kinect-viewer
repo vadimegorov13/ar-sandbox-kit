@@ -1,0 +1,19 @@
+#!/bin/bash
+source "$(dirname "$(readlink -f "$0")")/common.sh"
+
+if ! kinect_connected; then
+    show_error "The Kinect was not detected. Check power and USB connections."
+    exit 1
+fi
+
+if pgrep -x SARndbox >/dev/null || pgrep -f '/bin/CalibrateProjector([[:space:]]|$)' >/dev/null; then
+    if ! zenity --question --title="Camera is in use" --width=500 \
+        --text="Another AR Sandbox program is using the Kinect. Close it and open Kinect Viewer?"; then
+        exit 0
+    fi
+fi
+
+stop_ar_programs
+timestamp=$(date +%Y%m%d-%H%M%S)
+log_file="$AR_STATE/RawKinectViewer-$timestamp.log"
+stdbuf -oL -eL "$VRUI_PREFIX/bin/RawKinectViewer" -compress 0 >>"$log_file" 2>&1

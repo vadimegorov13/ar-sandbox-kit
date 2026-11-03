@@ -1,0 +1,10 @@
+#!/bin/bash
+# Opens the driver repair in a visible terminal and waits until it is closed.
+repair="$(dirname "$(readlink -f "$0")")/repair-graphics-driver"
+if command -v gnome-terminal >/dev/null; then
+    exec gnome-terminal --wait --title="Repair graphics driver" -- "$repair"
+elif command -v x-terminal-emulator >/dev/null; then
+    exec x-terminal-emulator -e "$repair"
+else
+    exec xterm -T "Repair graphics driver" -e "$repair"
+fi

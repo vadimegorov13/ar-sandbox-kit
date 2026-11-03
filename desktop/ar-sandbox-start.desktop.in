@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Start AR Sandbox
+Comment=Start the AR Sandbox with water and hand-triggered rain
+Exec=@BIN@/start-sandbox water
+Icon=media-playback-start
+Terminal=false
+StartupNotify=true
+Categories=Education;Science;

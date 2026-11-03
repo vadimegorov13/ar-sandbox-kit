@@ -1,0 +1,29 @@
+#!/bin/bash
+source "$(dirname "$(readlink -f "$0")")/common.sh"
+
+if ! kinect_connected; then
+    show_error "The Kinect was not detected. Check power and USB connections."
+    exit 1
+fi
+
+serial=$("$VRUI_PREFIX/bin/KinectUtil" list 2>/dev/null | sed -n 's/.*device serial number //p' | head -n1)
+calibration_file="$KINECT_CONFIG/IntrinsicParameters-$serial.dat"
+
+if [ -n "$serial" ] && [ -f "$calibration_file" ]; then
+    show_info "Factory calibration is already installed for Kinect:\n\n$serial\n\nFile:\n$calibration_file\n\nNo action is needed unless the Kinect is replaced."
+    exit 0
+fi
+
+if ! zenity --question --title="Retrieve Kinect calibration" --width=540 \
+    --text="Retrieve factory calibration from Kinect 0?\n\nAn administrator password dialog will appear."; then
+    exit 0
+fi
+
+stop_ar_programs
+timestamp=$(date +%Y%m%d-%H%M%S)
+log_file="$AR_STATE/KinectFactoryCalibration-$timestamp.log"
+if pkexec "$VRUI_PREFIX/bin/KinectUtil" getCalib 0 >"$log_file" 2>&1; then
+    show_info "Kinect factory calibration was retrieved successfully."
+else
+    show_error "Factory calibration failed. Open AR Sandbox Status and inspect the latest log."
+fi

@@ -1,0 +1,3 @@
+#!/bin/bash
+# Opens the AR Sandbox Control Center window.
+exec /usr/bin/python3 "$(dirname "$(readlink -f "$0")")/control-center.py" "$@"

@@ -1,0 +1,151 @@
+#!/bin/bash
+source "$(dirname "$(readlink -f "$0")")/common.sh"
+
+if ! kinect_connected; then
+    show_error "The Kinect was not detected. Check power and USB connections."
+    exit 1
+fi
+
+if ! zenity --question --title="Sandbox geometry calibration" --width=620 \
+    --ok-label="Begin" --cancel-label="Cancel" \
+    --text="This wizard re-measures the base plane and four inside corners.\n\nBefore beginning:\n• The Kinect must be in its final fixed position.\n• Remove all objects and flatten the sand carefully.\n• Do not move the Kinect afterward.\n\nThe existing layout will be backed up. Continue?"; then
+    exit 0
+fi
+
+stop_ar_programs
+timestamp=$(date +%Y%m%d-%H%M%S)
+measurement_log="$AR_STATE/GeometryCalibration-$timestamp.log"
+: >"$measurement_log"
+stdbuf -oL -eL "$VRUI_PREFIX/bin/RawKinectViewer" -compress 0 >>"$measurement_log" 2>&1 &
+viewer_pid=$!
+sleep 2
+
+if ! kill -0 "$viewer_pid" 2>/dev/null; then
+    show_error "Kinect Viewer could not start. Open System Status and inspect the latest log."
+    exit 1
+fi
+
+zenity --info --title="Step 1 of 2 — Base plane" --width=680 \
+    --ok-label="I captured two planes" \
+    --text="In the LEFT green depth image:\n\n1. Right-click and enable Average Frames. Wait until capture finishes.\n2. Hold P, choose Extract Planes, then release P.\n3. Hold P and move the mouse to draw a large rectangle over flat sand only; release P.\n4. Repeat once over another large flat area.\n\nAvoid walls, borders, and black holes. Click the button below only after two successful plane equations appear."
+
+plane_count=$(grep -c '^Camera-space plane equation:' "$measurement_log" || true)
+if [ "$plane_count" -lt 2 ]; then
+    kill -INT "$viewer_pid" 2>/dev/null || true
+    show_error "Fewer than two valid plane measurements were recorded. The old layout was not changed. Run the wizard again."
+    exit 1
+fi
+
+zenity --info --title="Step 2 of 2 — Four corners" --width=680 \
+    --ok-label="I captured four corners" \
+    --text="Keep Average Frames enabled. In the LEFT green depth image:\n\n1. Hold M, choose Measure 3D Positions, then release M.\n2. Press and release M exactly once at each inside sand corner:\n\n   1 — top-left       2 — top-right\n   3 — bottom-left    4 — bottom-right\n\nUse the same small inset from the wall at every corner. Click the button below only after exactly four positions are recorded."
+
+position_count=$(grep -Ec '^\([[:space:]]*[-+0-9.]' "$measurement_log" || true)
+kill -INT "$viewer_pid" 2>/dev/null || true
+
+if [ "$position_count" -ne 4 ]; then
+    show_error "Expected exactly four corner measurements but found $position_count. The old layout was not changed. Run the wizard again."
+    exit 1
+fi
+
+layout_file="$SANDBOX_CONFIG/BoxLayout.txt"
+backup_file="$SANDBOX_CONFIG/BoxLayout.txt.backup-$timestamp"
+summary_file="$AR_STATE/GeometryCalibration-$timestamp-summary.txt"
+
+if ! python3 - "$measurement_log" "$layout_file" "$backup_file" >"$summary_file" <<'PY'
+import math
+import pathlib
+import re
+import shutil
+import sys
+
+log_path, layout_path, backup_path = map(pathlib.Path, sys.argv[1:4])
+text = log_path.read_text()
+
+planes = []
+for match in re.finditer(
+    r"^Camera-space plane equation: x \* \(([-+0-9.eE]+),\s*([-+0-9.eE]+),\s*([-+0-9.eE]+)\) = ([-+0-9.eE]+)$",
+    text,
+    re.MULTILINE,
+):
+    planes.append(tuple(map(float, match.groups())))
+
+positions = []
+for match in re.finditer(
+    r"^\(\s*([-+0-9.eE]+),\s*([-+0-9.eE]+),\s*([-+0-9.eE]+)\)\s*$",
+    text,
+    re.MULTILINE,
+):
+    positions.append(tuple(map(float, match.groups())))
+
+if len(planes) < 2 or len(positions) != 4:
+    raise SystemExit(2)
+
+planes = planes[-2:]
+normal = [sum(p[i] for p in planes) / 2.0 for i in range(3)]
+normal_length = math.sqrt(sum(v * v for v in normal))
+normal = [v / normal_length for v in normal]
+offset = sum(p[3] for p in planes) / 2.0
+
+def distance(a, b):
+    return math.sqrt(sum((x - y) ** 2 for x, y in zip(a, b)))
+
+top_left, top_right, bottom_left, bottom_right = positions
+top_width = distance(top_left, top_right)
+bottom_width = distance(bottom_left, bottom_right)
+left_depth = distance(top_left, bottom_left)
+right_depth = distance(top_right, bottom_right)
+diag_a = distance(top_left, bottom_right)
+diag_b = distance(top_right, bottom_left)
+heights = [sum(n * q for n, q in zip(normal, point)) - offset for point in positions]
+
+valid = (
+    min(top_width, bottom_width, left_depth, right_depth) > 30.0
+    and abs(top_width - bottom_width) < 10.0
+    and abs(left_depth - right_depth) < 10.0
+    and abs(diag_a - diag_b) < 10.0
+    and max(abs(h) for h in heights) < 5.0
+)
+
+print(f"Plane: ({normal[0]:.10f}, {normal[1]:.10f}, {normal[2]:.10f}), {offset:.4f}")
+print(f"Widths: {top_width:.1f} / {bottom_width:.1f} cm")
+print(f"Depths: {left_depth:.1f} / {right_depth:.1f} cm")
+print(f"Diagonals: {diag_a:.1f} / {diag_b:.1f} cm")
+print("Corner heights: " + ", ".join(f"{h:.1f}" for h in heights) + " cm")
+
+if not valid:
+    print("RESULT: Measurements failed consistency checks; layout not changed.")
+    raise SystemExit(3)
+
+# BoxLayout requires lower-left, lower-right, upper-left, upper-right.
+ordered = (bottom_left, bottom_right, top_left, top_right)
+new_text = f"({normal[0]:.10f}, {normal[1]:.10f}, {normal[2]:.10f}), {offset:.4f}\n"
+new_text += "\n".join(f"({p[0]:10.4f}, {p[1]:10.4f}, {p[2]:10.4f})" for p in ordered) + "\n"
+
+shutil.copy2(layout_path, backup_path)
+layout_path.write_text(new_text)
+print(f"Backup: {backup_path}")
+print(f"Updated: {layout_path}")
+print("RESULT: Geometry calibration saved successfully.")
+PY
+then
+    zenity --text-info --title="Measurements need to be repeated" --width=720 --height=480 \
+        --filename="$summary_file" --font="Monospace 10"
+    exit 1
+fi
+
+projector_matrix="$SANDBOX_CONFIG/ProjectorMatrix.dat"
+if [ -f "$projector_matrix" ]; then
+    mv "$projector_matrix" "$SANDBOX_CONFIG/ProjectorMatrix.dat.invalidated-$timestamp"
+fi
+
+sync_active_geometry
+if profile_dir=$(active_profile_dir); then
+    if [ -f "$profile_dir/ProjectorMatrix.dat" ]; then
+        mv "$profile_dir/ProjectorMatrix.dat" "$profile_dir/ProjectorMatrix.dat.invalidated-$timestamp"
+    fi
+fi
+
+zenity --text-info --title="Geometry calibration saved" --width=720 --height=520 \
+    --filename="$summary_file" --font="Monospace 10"
+show_info "Sandbox geometry was updated.\n\nProjector calibration must now be performed before normal aligned operation."

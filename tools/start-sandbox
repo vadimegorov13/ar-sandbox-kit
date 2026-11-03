@@ -1,0 +1,68 @@
+#!/bin/bash
+set -u
+source "$(dirname "$(readlink -f "$0")")/common.sh"
+
+run_mode=${1:-water}
+
+if pgrep -x SARndbox >/dev/null; then
+    running_pid=$(pgrep -x SARndbox | head -n 1)
+    running_command=$(tr '\0' ' ' <"/proc/$running_pid/cmdline" 2>/dev/null || true)
+    if [ "$run_mode" != "no-water" ] && [[ "$running_command" == *"-ws 0.0"* ]]; then
+        if ! zenity --question --title="Enable water and rain clouds?" --width=520 \
+            --text="The sandbox is currently running without water.\n\nRestart it with water and automatic hand-triggered rain enabled?"; then
+            exit 0
+        fi
+        stop_ar_programs
+    else
+        show_info "The AR Sandbox is already running on the projector."
+        exit 0
+    fi
+fi
+
+if ! kinect_connected; then
+    show_error "The Kinect was not detected.\n\nCheck its power adapter and USB cable, then try again."
+    exit 1
+fi
+
+if ! configure_displays; then
+    show_error "The projector display could not be found.\n\nCheck the projector power and video cable. If the output name changed, set PROJECTOR_OUTPUT in ~/.config/ar-sandbox/ar-sandbox.conf."
+    exit 1
+fi
+
+projector_matrix="$SANDBOX_CONFIG/ProjectorMatrix.dat"
+if [ -f "$projector_matrix" ] && ! "$AR_BIN"/validate-projector-matrix "$SANDBOX_CONFIG/BoxLayout.txt" "$projector_matrix" "$PROJECTOR_WIDTH" "$PROJECTOR_HEIGHT" >/dev/null 2>&1; then
+    timestamp=$(date +%Y%m%d-%H%M%S)
+    mv "$projector_matrix" "$SANDBOX_CONFIG/ProjectorMatrix.dat.rejected-$timestamp"
+fi
+args=(-uhm)
+
+if [ -f "$projector_matrix" ]; then
+    args+=(-fpv)
+    if [ "$run_mode" = "no-water" ]; then
+        args+=(-ws 0.0 0)
+    else
+        # A reduced water grid keeps mid-range GPUs smooth; see WATER_GRID_* in the config.
+        args+=(-wts "$WATER_GRID_WIDTH" "$WATER_GRID_HEIGHT" -ws 1.0 30)
+    fi
+else
+    if [ "$run_mode" = "no-water" ]; then
+        prompt_text="Projector calibration has not been completed.\n\nThe sandbox can run, but colors and contours will not line up precisely with the sand. Water will be disabled.\n\nStart the uncalibrated demo?"
+    else
+        prompt_text="Projector calibration has not been completed.\n\nTerrain, water, and hand-triggered rain will work, but the projection may not line up precisely with the sand or your hand.\n\nStart AR Sandbox anyway?"
+    fi
+    if ! zenity --question --title="Projector calibration missing" --width=560 \
+        --ok-label="Start uncalibrated demo" --cancel-label="Cancel" \
+        --text="$prompt_text"; then
+        exit 0
+    fi
+    if [ "$run_mode" = "no-water" ]; then
+        args+=(-ws 0.0 0)
+    else
+        args+=(-wts "$WATER_GRID_WIDTH" "$WATER_GRID_HEIGHT" -ws 1.0 30)
+    fi
+fi
+
+timestamp=$(date +%Y%m%d-%H%M%S)
+log_file="$AR_STATE/SARndbox-$timestamp.log"
+cd "$SANDBOX_ROOT" || exit 1
+stdbuf -oL -eL ./bin/SARndbox "${args[@]}" >>"$log_file" 2>&1

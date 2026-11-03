@@ -1,0 +1,16 @@
+--- a/CalibrateProjector.cpp
++++ b/CalibrateProjector.cpp
+@@ -443,6 +443,13 @@
+ 				/* Stop capturing this tie point and move to the next: */
+ 				std::cout<<"done"<<std::endl;
+ 				capturingTiePoint=false;
++				
++				/* Report the captured disk center, averaged over this tie point's frames: */
++				double avgCenter[3]={0.0,0.0,0.0};
++				for(size_t f=0;f<size_t(numTiePointFrames);++f)
++					for(int i=0;i<3;++i)
++						avgCenter[i]+=double(tiePoints[tiePoints.size()-1-f].o[i]);
++				std::cout<<"Tie point position: "<<avgCenter[0]/double(numTiePointFrames)<<", "<<avgCenter[1]/double(numTiePointFrames)<<", "<<avgCenter[2]/double(numTiePointFrames)<<std::endl;
+ 				++tiePointIndex;
+ 				
+ 				/* Check if the calibration is complete: */

@@ -1,0 +1,25 @@
+--- a/Vrui/SoundContext.h
++++ b/Vrui/SoundContext.h
+@@ -27,14 +27,18 @@
+ #include <string>
+ #include <AL/Config.h>
+ 
++#if ALSUPPORT_CONFIG_HAVE_OPENAL
++#ifdef __APPLE__
++#include <OpenAL/alc.h>
++#else
++#include <AL/alc.h>
++#endif
++#endif
++
+ /* Forward declarations: */
+ namespace Misc {
+ class ConfigurationFileSection;
+ }
+-struct ALCdevice_struct;
+-typedef struct ALCdevice_struct ALCdevice;
+-struct ALCcontext_struct;
+-typedef struct ALCcontext_struct ALCcontext;
+ class ALContextData;
+ namespace SceneGraph {
+ class ALRenderState;

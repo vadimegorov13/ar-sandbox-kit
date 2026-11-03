@@ -1,0 +1,4 @@
+#!/bin/bash
+source "$(dirname "$(readlink -f "$0")")/common.sh"
+stop_ar_programs
+notify-send "AR Sandbox" "Sandbox and calibration applications stopped."

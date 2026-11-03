@@ -1,0 +1,58 @@
+#!/bin/bash
+source "$(dirname "$(readlink -f "$0")")/common.sh"
+
+status_file=$(mktemp /tmp/ar-sandbox-status.XXXXXX)
+trap 'rm -f "$status_file"' EXIT
+
+{
+    echo "AR SANDBOX STATUS"
+    echo "Generated: $(date)"
+    echo
+    echo "KINECT"
+    "$VRUI_PREFIX/bin/KinectUtil" list 2>&1 || true
+    echo
+    if compgen -G "$KINECT_CONFIG/IntrinsicParameters-*.dat" >/dev/null; then
+        echo "Factory calibration: INSTALLED"
+    else
+        echo "Factory calibration: MISSING"
+    fi
+    echo
+    echo "PROJECTOR"
+    xrandr --listmonitors
+    echo
+    echo "SANDBOX GEOMETRY"
+    if [ -f "$SANDBOX_CONFIG/BoxLayout.txt" ]; then
+        echo "BoxLayout.txt: PRESENT"
+        sed -n '1,5p' "$SANDBOX_CONFIG/BoxLayout.txt"
+    else
+        echo "BoxLayout.txt: MISSING"
+    fi
+    echo
+    if [ -f "$SANDBOX_CONFIG/ProjectorMatrix.dat" ]; then
+        echo "Projector calibration: INSTALLED"
+    else
+        echo "Projector calibration: MISSING (uncalibrated mode only)"
+    fi
+    echo
+    echo "CALIBRATION PROFILE"
+    if profile_dir=$(active_profile_dir); then
+        echo "Active: $(basename "$profile_dir")"
+        echo "Folder: $profile_dir"
+    else
+        echo "Active: NONE"
+    fi
+    echo
+    echo "GRAPHICS"
+    glxinfo -B 2>&1 | grep -E 'direct rendering|OpenGL vendor|OpenGL renderer|OpenGL version'
+    echo
+    echo "RUNNING PROGRAMS"
+    pgrep -a -x SARndbox || true
+    pgrep -a -x RawKinectViewer || true
+    pgrep -a -f '/bin/CalibrateProjector([[:space:]]|$)' || true
+    echo
+    echo "LOG DIRECTORY"
+    echo "$AR_STATE"
+} >"$status_file"
+
+zenity --text-info --title="AR Sandbox Status" --width=820 --height=650 \
+    --filename="$status_file" --font="Monospace 10"

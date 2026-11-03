@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Stop AR Sandbox
+Comment=Close the sandbox and calibration programs
+Exec=@BIN@/stop-sandbox
+Icon=process-stop
+Terminal=false
+StartupNotify=false
+Categories=Education;Science;
